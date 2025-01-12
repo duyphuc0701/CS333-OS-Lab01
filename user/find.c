@@ -2,86 +2,88 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 #include "kernel/fs.h"
-#include "kernel/fcntl.h"
 
 // Function to extract the base name (file or directory name) from a given path
-char * fmtname(char* path) {
-	char *p;
-	for (p = path + strlen(path); p >= path && *p!='/'; p--);
-	p++;
-
-	return p;
+char *fmtname(char *path) {
+    char *p;
+    for (p = path + strlen(path); p >= path && *p != '/'; p--);
+    return p + 1;
 }
 
-void find(char *path , char *file) {
-    char buf[512];
-    char *p;
+// Recursive function to find the file
+void find(char *path, char *file) {
+    char buf[512], *p;
     int fd;
     struct dirent de;
-	struct stat st;
+    struct stat st;
 
-    // Open the current directory
-	if ((fd = open(path, O_RDONLY)) < 0) {
-		fprintf(2, "find: cannot open %s\n", path);
-		return;
-	}
+    // Open the directory
+    if ((fd = open(path, 0)) < 0) {
+        fprintf(2, "find: cannot open %s\n", path);
+        return;
+    }
 
-    // Get the metadata of the current file/directory
-	if (fstat(fd, &st) < 0) {
-		fprintf(2, "find: cannot fstat %s\n", path);
+    // Get the metadata of the path
+    if (fstat(fd, &st) < 0) {
+        fprintf(2, "find: cannot stat %s\n", path);
         close(fd);
         return;
-	}
+    }
 
-	switch (st.type) {
-        case T_DEVICE:
-        case T_FILE:
-            // Compare the file name with the target file name
-            if (strcmp(fmtname(path), fmtname(file)) == 0) 
-                fprintf(1, "%s\n", path);
+    switch (st.type) {
+    case T_FILE:
+        if (strcmp(fmtname(path), file) == 0) {
+            printf("%s\n", path);
+        }
+        break;
+
+    case T_DIR:
+        // Ensure the buffer has enough space for the new path
+        if (strlen(path) + 1 + DIRSIZ + 1 > sizeof(buf)) {
+            fprintf(2, "find: path too long\n");
             break;
-        case T_DIR:
-            // Check if the buffer size can accommodate the new path
-            if (strlen(path) + 1 + DIRSIZ + 1 > sizeof(buf)) {
-                fprintf(2, "find: path too long\n");
-                break;
-            }
-            // Copy the current directory path to the buffer
-            strcpy(buf, path);
-            p = buf + strlen(buf);
-            *p++ = '/';
-            // Read entries in the directory
-            while(read(fd, &de, sizeof(de)) == sizeof(de)) {
-                if (de.inum == 0) 
-                    continue;
-                // Skip "." and ".." to avoid infinite loops
-                if (strcmp(de.name, ".") != 0 && strcmp(de.name, "..") != 0) {
-                    memmove(p, de.name, DIRSIZ);
-                    // Null-terminate the path
-                    p[DIRSIZ] = '\0';
-                    // Recursively call find for the new path
-                    find(buf, file);
-                }
-            }
-            break;
-	}
-	close(fd);
+        }
+
+        // Copy the directory path to the buffer
+        strcpy(buf, path);
+        p = buf + strlen(buf);
+        *p++ = '/';
+
+        // Read directory entries
+        while (read(fd, &de, sizeof(de)) == sizeof(de)) {
+            if (de.inum == 0)
+                continue;
+
+            // Skip "." and ".." to avoid infinite loops
+            if (strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0)
+                continue;
+
+            // Append the entry name to the path
+            memmove(p, de.name, strlen(de.name));
+            p[strlen(de.name)] = '\0';
+
+            // Recursively call find for the new path
+            find(buf, file);
+        }
+        break;
+    }
+
+    close(fd);
 }
 
-int main(int argc, char *argv[])
-{
-	if (argc < 2) {
-		fprintf(2, "The correct format should be: find [DIRECTORY_TREE_ROOT] FILE_NAME\n");
-		exit(1);
-	}
-	if (argc < 3) {
-        find(".", argv[1]);
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(2, "Usage: find [directory] filename\n");
+        exit(1);
     }
-	else {
-		for(int i = 1; i < argc - 1; i++) {
-            find(argv[i], argv[argc - 1]);
-        }
-	}
 
-	exit(0);
+    if (argc == 2) {
+        find(".", argv[1]); // Default to current directory if no directory is provided
+    } else {
+        for (int i = 1; i < argc - 1; i++) {
+            find(argv[i], argv[argc - 1]); // Search in specified directories
+        }
+    }
+
+    exit(0);
 }

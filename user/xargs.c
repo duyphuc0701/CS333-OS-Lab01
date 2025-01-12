@@ -3,61 +3,61 @@
 #include "kernel/param.h"
 
 // Helper function to handle argument processing
-int process_argument(char *buf, char **arg_s, char **arg_e, char *x_argv[], int *x_argc, int argc) {
-    if (*x_argc == MAXARG - 1) { // If full
+int process_argument(char *buffer, char **arg_start, char **arg_end, char *command_args[], int *arg_count, int initial_arg_count) {
+    if (*arg_count == MAXARG - 1) {
         fprintf(2, "xargs: too many arguments\n");
-        *arg_s = *arg_e = buf; // Reset the buffer
-        **arg_e = '\0'; // Null-terminate the buffer
+        *arg_start = *arg_end = buffer; 
+        **arg_end = '\0';
         // Skip remaining characters until the next newline
-        while (**arg_e != '\n') {
-            if (read(0, *arg_e, sizeof(char)) <= 0) return -1; // Handle EOF or read error
+        while (**arg_end != '\n') {
+            if (read(0, *arg_end, sizeof(char)) <= 0) return -1; // Handle EOF or read error
         }
         return 0; // Indicate buffer reset
     } else { // Not full
-        **arg_e = '\0'; // Null-terminate the argument
-        x_argv[(*x_argc)++] = *arg_s; // Add argument to x_argv
-        (*arg_e)++; // Move end pointer forward
-        *arg_s = *arg_e; // Move start pointer forward
+        **arg_end = '\0'; // Null-terminate the argument
+        command_args[(*arg_count)++] = *arg_start; // Add argument to command_args
+        (*arg_end)++; // Move end pointer forward
+        *arg_start = *arg_end; // Move start pointer forward
         return 1; // Indicate successful argument processing
     }
 }
 
 int main(int argc, char *argv[]) {
-    char *x_argv[MAXARG];
-    char buf[512];
-    int x_argc = argc - 1;
-    char *arg_s = buf;
-    char *arg_e = buf;
+    char *command_args[MAXARG];
+    char input_buffer[512];
+    int current_arg_count = argc - 1;
+    char *arg_start = input_buffer;
+    char *arg_end = input_buffer;
 
-    // Copy the initial arguments to x_argv
+    // Copy the initial arguments to command_args
     for (int i = 1; i < argc; i++) {
-        x_argv[i - 1] = argv[i];
+        command_args[i - 1] = argv[i];
     }
 
     // Read input and process arguments
-    while (read(0, arg_e, sizeof(char))) {
-        if (*arg_e == '\n' || *arg_e == ' ') {
-            if (process_argument(buf, &arg_s, &arg_e, x_argv, &x_argc, argc) == -1) break;
+    while (read(0, arg_end, sizeof(char))) {
+        if (*arg_end == '\n' || *arg_end == ' ') {
+            if (process_argument(input_buffer, &arg_start, &arg_end, command_args, &current_arg_count, argc) == -1) break;
             
             // Fork and exec after newline
-            if (*arg_e == '\n') {
+            if (*arg_end == '\n') {
                 if (fork() == 0) {
-                    exec(x_argv[0], x_argv);
+                    exec(command_args[0], command_args);
                 }
                 // Reset buffer and argument count after executing the command
-                arg_s = arg_e = buf;
-                x_argc = argc - 1;
+                arg_start = arg_end = input_buffer;
+                current_arg_count = argc - 1;
             }
         } else {
-            arg_e++; // Accumulate characters for the current argument
+            arg_end++; // Accumulate characters for the current argument
         }
     }
 
     // Handle the remaining buffer after EOF
-    if (buf != arg_e) {
-        process_argument(buf, &arg_s, &arg_e, x_argv, &x_argc, argc);
+    if (input_buffer != arg_end) {
+        process_argument(input_buffer, &arg_start, &arg_end, command_args, &current_arg_count, argc);
         if (fork() == 0) {
-            exec(x_argv[0], x_argv);
+            exec(command_args[0], command_args);
         }
     }
 
