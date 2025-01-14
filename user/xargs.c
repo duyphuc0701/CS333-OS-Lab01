@@ -3,93 +3,74 @@
 #include "kernel/param.h"
 #include "user/user.h"
 
-// 1 为打印调试信息
-#define DEBUG 0
-
-// 宏定义
-#define debug(codes) if(DEBUG) {codes}
-
-void xargs_exec(char* program, char** paraments);
-
-void
-xargs(char** first_arg, int size, char* program_name)
-{
-    char buf[1024];
-    debug(
-        for (int i = 0; i < size; ++i) {
-            printf("first_arg[%d] = %s\n", i, first_arg[i]);
-        }
-    )
-    char *arg[MAXARG];
-    int m = 0;
-    while (read(0, buf+m, 1) == 1) {
-        if (m >= 1024) {
-            fprintf(2, "xargs: arguments too long.\n");
-            exit(1);
-        }
-        if (buf[m] == '\n') {
-            buf[m] = '\0';
-            debug(printf("this line is %s\n", buf);)
-            memmove(arg, first_arg, sizeof(*first_arg)*size);
-            // set a arg index
-            int argIndex = size;
-            if (argIndex == 0) {
-                arg[argIndex] = program_name;
-                argIndex++;
-            }
-            arg[argIndex] = malloc(sizeof(char)*(m+1));
-            memmove(arg[argIndex], buf, m+1);
-            debug(
-                for (int j = 0; j <= argIndex; ++j)
-                    printf("arg[%d] = *%s*\n", j, arg[j]);
-            )
-            // exec(char*, char** paraments): paraments ending with zero
-            arg[argIndex+1] = 0;
-            xargs_exec(program_name, arg);
-            free(arg[argIndex]);
-            m = 0;
-        } else {
-            m++;
-        }
-    }
-}
-
-void
-xargs_exec(char* program, char** paraments)
-{
+// Function to fork a child process and execute the given program with arguments
+void execute_program(char* program, char** arguments) {
     if (fork() > 0) {
         wait(0);
     } else {
-        debug(
-            printf("child process\n");
-            printf("    program = %s\n", program);
-            
-            for (int i = 0; paraments[i] != 0; ++i) {
-                printf("    paraments[%d] = %s\n", i, paraments[i]);
-            }
-        )
-        if (exec(program, paraments) == -1) {
-            fprintf(2, "xargs: Error exec %s\n", program);
+        if (exec(program, arguments) == -1) {
+            fprintf(2, "xargs: Error executing %s\n", program);
+            exit(1);
         }
-        debug(printf("child exit");)
     }
 }
 
-int
-main(int argc, char* argv[])
-{
-    debug(printf("main func\n");)
-    char *name = "echo";
+// Function to implement the xargs functionality
+void process_input_and_execute(char** initial_args, int initial_arg_count, char* program_name) {
+    // Buffer to store input read from stdin
+    char input_buffer[1024];
+    // Array to store arguments for the program 
+    char *arguments[MAXARG];
+    // Index to track position in the input buffer
+    int buffer_index = 0;
+
+    // Read input line by line from stdin
+    while (read(0, input_buffer + buffer_index, 1) == 1) {
+        if (buffer_index >= 1024) {
+            fprintf(2, "xargs: Input too long.\n");
+            exit(1);
+        }
+
+        // Check for end of a line
+        if (input_buffer[buffer_index] == '\n') {
+            input_buffer[buffer_index] = '\0';
+
+            memmove(arguments, initial_args, sizeof(*initial_args) * initial_arg_count);
+
+            // Add the new argument from input
+            int arg_index = initial_arg_count;
+            if (arg_index == 0) {
+                arguments[arg_index] = program_name;
+                arg_index++;
+            }
+            arguments[arg_index] = malloc(sizeof(char) * (buffer_index + 1));
+            memmove(arguments[arg_index], input_buffer, buffer_index + 1);
+
+            // Null-terminate the arguments array
+            arguments[arg_index + 1] = 0;
+
+            // Execute the program with the constructed arguments
+            execute_program(program_name, arguments);
+
+            free(arguments[arg_index]);
+
+            // Reset the buffer index for the next line
+            buffer_index = 0;
+        } else {
+            buffer_index++;
+        }
+    }
+}
+
+int main(int argc, char* argv[]) {
+    // Default program name to "echo" if none is provided
+    char *default_program = "echo";
     if (argc >= 2) {
-        name = argv[1];
-        debug(
-            printf("argc >= 2\n");
-            printf("argv[1] = %s\n", argv[1]);
-        )
+        default_program = argv[1];
     }
-    else {
-        debug(printf("argc == 1\n");)
-    }
-    xargs(argv + 1, argc - 1, name);
+
+    // Call the xargs functionality with the provided arguments
+    process_input_and_execute(argv + 1, argc - 1, default_program);
+
     exit(0);
 }
