@@ -1,66 +1,95 @@
 #include "kernel/types.h"
-#include "user/user.h"
+#include "kernel/stat.h"
 #include "kernel/param.h"
+#include "user/user.h"
 
-// Helper function to handle argument processing
-int process_argument(char *buffer, char **arg_start, char **arg_end, char *command_args[], int *arg_count, int initial_arg_count) {
-    if (*arg_count == MAXARG - 1) {
-        fprintf(2, "xargs: too many arguments\n");
-        *arg_start = *arg_end = buffer; 
-        **arg_end = '\0';
-        // Skip remaining characters until the next newline
-        while (**arg_end != '\n') {
-            if (read(0, *arg_end, sizeof(char)) <= 0) return -1; // Handle EOF or read error
+// 1 为打印调试信息
+#define DEBUG 0
+
+// 宏定义
+#define debug(codes) if(DEBUG) {codes}
+
+void xargs_exec(char* program, char** paraments);
+
+void
+xargs(char** first_arg, int size, char* program_name)
+{
+    char buf[1024];
+    debug(
+        for (int i = 0; i < size; ++i) {
+            printf("first_arg[%d] = %s\n", i, first_arg[i]);
         }
-        return 0; // Indicate buffer reset
-    } else { // Not full
-        **arg_end = '\0'; // Null-terminate the argument
-        command_args[(*arg_count)++] = *arg_start; // Add argument to command_args
-        (*arg_end)++; // Move end pointer forward
-        *arg_start = *arg_end; // Move start pointer forward
-        return 1; // Indicate successful argument processing
+    )
+    char *arg[MAXARG];
+    int m = 0;
+    while (read(0, buf+m, 1) == 1) {
+        if (m >= 1024) {
+            fprintf(2, "xargs: arguments too long.\n");
+            exit(1);
+        }
+        if (buf[m] == '\n') {
+            buf[m] = '\0';
+            debug(printf("this line is %s\n", buf);)
+            memmove(arg, first_arg, sizeof(*first_arg)*size);
+            // set a arg index
+            int argIndex = size;
+            if (argIndex == 0) {
+                arg[argIndex] = program_name;
+                argIndex++;
+            }
+            arg[argIndex] = malloc(sizeof(char)*(m+1));
+            memmove(arg[argIndex], buf, m+1);
+            debug(
+                for (int j = 0; j <= argIndex; ++j)
+                    printf("arg[%d] = *%s*\n", j, arg[j]);
+            )
+            // exec(char*, char** paraments): paraments ending with zero
+            arg[argIndex+1] = 0;
+            xargs_exec(program_name, arg);
+            free(arg[argIndex]);
+            m = 0;
+        } else {
+            m++;
+        }
     }
 }
 
-int main(int argc, char *argv[]) {
-    char *command_args[MAXARG];
-    char input_buffer[512];
-    int current_arg_count = argc - 1;
-    char *arg_start = input_buffer;
-    char *arg_end = input_buffer;
-
-    // Copy the initial arguments to command_args
-    for (int i = 1; i < argc; i++) {
-        command_args[i - 1] = argv[i];
-    }
-
-    // Read input and process arguments
-    while (read(0, arg_end, sizeof(char))) {
-        if (*arg_end == '\n' || *arg_end == ' ') {
-            if (process_argument(input_buffer, &arg_start, &arg_end, command_args, &current_arg_count, argc) == -1) break;
+void
+xargs_exec(char* program, char** paraments)
+{
+    if (fork() > 0) {
+        wait(0);
+    } else {
+        debug(
+            printf("child process\n");
+            printf("    program = %s\n", program);
             
-            // Fork and exec after newline
-            if (*arg_end == '\n') {
-                if (fork() == 0) {
-                    exec(command_args[0], command_args);
-                }
-                // Reset buffer and argument count after executing the command
-                arg_start = arg_end = input_buffer;
-                current_arg_count = argc - 1;
+            for (int i = 0; paraments[i] != 0; ++i) {
+                printf("    paraments[%d] = %s\n", i, paraments[i]);
             }
-        } else {
-            arg_end++; // Accumulate characters for the current argument
+        )
+        if (exec(program, paraments) == -1) {
+            fprintf(2, "xargs: Error exec %s\n", program);
         }
+        debug(printf("child exit");)
     }
+}
 
-    // Handle the remaining buffer after EOF
-    if (input_buffer != arg_end) {
-        process_argument(input_buffer, &arg_start, &arg_end, command_args, &current_arg_count, argc);
-        if (fork() == 0) {
-            exec(command_args[0], command_args);
-        }
+int
+main(int argc, char* argv[])
+{
+    debug(printf("main func\n");)
+    char *name = "echo";
+    if (argc >= 2) {
+        name = argv[1];
+        debug(
+            printf("argc >= 2\n");
+            printf("argv[1] = %s\n", argv[1]);
+        )
     }
-
-    wait(0); // Wait for all child processes to finish
+    else {
+        debug(printf("argc == 1\n");)
+    }
+    xargs(argv + 1, argc - 1, name);
     exit(0);
 }
