@@ -19,7 +19,7 @@ int sendToRightNeighbor(int read_end, int prime) {
         close(p[1]);
         exit(0);
     }
-
+    wait(0);
     close(p[1]);
     close(read_end);
     return p[0];
